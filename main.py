@@ -8,9 +8,30 @@ from google.genai import types
 with open("Persona_prompt.json", "r", encoding="utf-8") as f:
     Persona_Prompt = json.load(f)["system_instruction"]
 
-# Configure your Gemini API key in Streamlit secrets (e.g., ["genai"]["api_key"]) or set here directly
-# Example: genai.configure(api_key="YOUR_GEMINI_API_KEY")
-genai.configure(api_key=st.secrets["genai"]["api_key"] if "genai" in st.secrets else "YOUR_GEMINI_API_KEY")
+client = genai.Client(api_key=st.secrets["genai"]["api_key"] if "genai" in st.secrets else "")
+def callModel(contents):
+    # Create a system prompt entry
+    print(contents)
+    system_prompt = {
+        "role": "system",
+        "parts": [{"text": Persona_Prompt}]
+    }
+
+    # Convert user/assistant messages into Gemini-compatible format
+    formatted_msgs = [
+        {"role": msg["role"], "parts": [{"text": msg["content"]}]} for msg in contents
+    ]
+
+    # Prepend system instruction
+    full_contents = [system_prompt] + formatted_msgs
+
+    # Send to Gemini
+    res = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=json.dumps(full_contents)
+    )
+
+    return res.text
 
 # Initialize chat history in session state
 def init_chat():
@@ -19,9 +40,28 @@ def init_chat():
 
 init_chat()
 
-st.title("💬 Streamlit Chatbot (Gemini 2.0 Flash)")
+# Page config
+st.set_page_config(page_title="Gemini Chatbot", layout="centered")
+
+st.title("💬 CHAI DOCS (AI Bot)")
+
+# Sidebar for displaying persona prompt
+with st.sidebar:
+    st.title("🧠 System Prompt")
+    st.write(Persona_Prompt)
+
 st.markdown("""
 <style>
+    .main {
+        display: flex;
+        flex-direction: column;
+        height: 90vh;
+    }
+    .chat-container {
+        flex: 1;
+        overflow-y: auto;
+        padding-bottom: 60px;
+    }
     .stTextInput > div > div > input {
         font-size: 1rem;
         padding: 0.5rem;
@@ -29,39 +69,35 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Display chat messages
-def display_chat():
+# Auto-scroll JS
+st.markdown("""
+<script>
+    window.addEventListener('load', function() {
+        var chatContainer = window.parent.document.querySelector('.element-container div[data-testid=\"stVerticalBlock\"]');
+        if (chatContainer) chatContainer.scrollTop = chatContainer.scrollHeight;
+    });
+</script>
+""", unsafe_allow_html=True)
+
+def chatDisplay():
+    st.markdown('<div class="chat-container">', unsafe_allow_html=True)
     for msg in st.session_state.chat_history:
-        role = msg.get("role")
-        content = msg.get("content")
-        with st.chat_message(role):
-            st.markdown(content)
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+    st.markdown('</div>', unsafe_allow_html=True)
 
-# User input and send button
-with st.container():
-    user_input = st.chat_input("Type your message...")
+# Chat display section
+st.container()
 
-    if user_input:
-        # Append user message
-        st.session_state.chat_history.append({"role": "user", "content": user_input})
+# Input at the bottom
+user_input = st.chat_input("Type your message...")
 
-        # Create a chat session with persona prompt config
-        chat = genai.client.chats.create(
-            model="gemini-2.0-flash",
-            config=GenerateContentConfig(
-                system_instruction=Persona_Prompt
-            )
-        )
+if user_input:
+    st.session_state.chat_history.append({"role": "user", "content": user_input})
+    assistant_text = callModel(st.session_state.chat_history)
+    st.session_state.chat_history.append({"role": "assistant", "content": assistant_text})
+    chatDisplay()
+    # Safely trigger rerun *before* next render
+    # st.experimental_rerun()
 
-        # Send all messages in chat history
-        for msg in st.session_state.chat_history:
-            chat.send_message(msg["content"])
 
-        # Get assistant response
-        assistant_text = chat.last.text
-
-        # Append assistant response
-        st.session_state.chat_history.append({"role": "assistant", "content": assistant_text})
-
-# Display the chat
-display_chat()
